@@ -3,97 +3,271 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import Icon from '@/components/ui/icon';
 import { Badge } from '@/components/ui/badge';
+import { Slider } from '@/components/ui/slider';
 
-interface OpticalConfig {
-  objectiveMagnification: number;
-  objectiveNA: number;
-  condenserNA: number;
-  immersion: boolean;
-  lightWavelength: number;
-  method: 'brightfield' | 'darkfield' | 'phase' | 'fluorescence';
+interface NodeData {
+  id: string;
+  type: 'source' | 'condenser' | 'specimen' | 'objective' | 'eyepiece' | 'result' | 'method';
+  label: string;
+  icon: string;
+  value?: any;
+  x: number;
+  y: number;
+  outputs?: string[];
+  inputs?: string[];
 }
 
-interface Organelle {
-  name: string;
-  nameRu: string;
-  size: number;
-  visible: boolean;
-  type: 'animal' | 'plant' | 'bacteria' | 'virus';
+interface Connection {
+  from: string;
+  to: string;
+  active: boolean;
 }
 
 export default function MicroscopySchema() {
-  const [config, setConfig] = useState<OpticalConfig>({
-    objectiveMagnification: 40,
-    objectiveNA: 0.65,
-    condenserNA: 0.9,
-    immersion: false,
-    lightWavelength: 550,
-    method: 'brightfield'
+  const [selectedNode, setSelectedNode] = useState<string | null>(null);
+  const [showMobileWarning, setShowMobileWarning] = useState(true);
+  
+  const [lightSource, setLightSource] = useState({
+    wavelength: 550,
+    intensity: 100
   });
 
-  const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set());
-  const [showMobileWarning, setShowMobileWarning] = useState(true);
+  const [condenser, setCondenser] = useState({
+    na: 0.9,
+    diaphragm: 80
+  });
 
-  const toggleNode = (nodeId: string) => {
-    const newExpanded = new Set(expandedNodes);
-    if (newExpanded.has(nodeId)) {
-      newExpanded.delete(nodeId);
-    } else {
-      newExpanded.add(nodeId);
-    }
-    setExpandedNodes(newExpanded);
-  };
+  const [objective, setObjective] = useState({
+    magnification: 40,
+    na: 0.65,
+    immersion: false
+  });
+
+  const [method, setMethod] = useState<'brightfield' | 'darkfield' | 'phase' | 'fluorescence'>('brightfield');
 
   const calculateResolution = (): number => {
-    const lambda = config.lightWavelength;
-    const na = config.objectiveNA;
-    return (0.61 * lambda) / na;
+    const lambda = lightSource.wavelength;
+    const na = objective.na;
+    const methodFactor = method === 'fluorescence' ? 0.5 : 1;
+    return (0.61 * lambda * methodFactor) / na;
   };
 
-  const getVisibleOrganelles = (): Organelle[] => {
+  const getVisibleStructures = () => {
     const resolution = calculateResolution();
-    const organelles: Organelle[] = [
-      { name: 'Nucleus', nameRu: 'Ядро', size: 5000, visible: true, type: 'animal' },
-      { name: 'Mitochondria', nameRu: 'Митохондрии', size: 1000, visible: true, type: 'animal' },
-      { name: 'Chloroplast', nameRu: 'Хлоропласт', size: 5000, visible: true, type: 'plant' },
-      { name: 'Bacteria', nameRu: 'Бактерии', size: 500, visible: true, type: 'bacteria' },
-      { name: 'Golgi apparatus', nameRu: 'Аппарат Гольджи', size: 1000, visible: resolution < 1000, type: 'animal' },
-      { name: 'Endoplasmic reticulum', nameRu: 'ЭПР', size: 800, visible: resolution < 900, type: 'animal' },
-      { name: 'Ribosomes', nameRu: 'Рибосомы', size: 25, visible: resolution < 50 && config.method === 'fluorescence', type: 'animal' },
-      { name: 'Viruses', nameRu: 'Вирусы', size: 100, visible: resolution < 150 && config.method === 'fluorescence', type: 'virus' }
+    const structures = [
+      { name: 'Ядро клетки', size: 5000, emoji: '⚪', color: 'bg-blue-500' },
+      { name: 'Митохондрии', size: 1000, emoji: '🔵', color: 'bg-purple-500' },
+      { name: 'Хлоропласт', size: 5000, emoji: '🟢', color: 'bg-green-500' },
+      { name: 'Бактерии', size: 500, emoji: '🦠', color: 'bg-yellow-500' },
+      { name: 'Аппарат Гольджи', size: 1000, emoji: '🟣', color: 'bg-indigo-500' },
+      { name: 'Рибосомы', size: 25, emoji: '🔴', color: 'bg-red-500' },
+      { name: 'Вирусы', size: 100, emoji: '🔺', color: 'bg-orange-500' }
     ];
 
-    return organelles;
+    return structures.filter(s => s.size >= resolution);
   };
 
-  const methods = [
-    { id: 'brightfield', name: 'Светлое поле', icon: 'Sun', color: 'bg-yellow-500' },
-    { id: 'darkfield', name: 'Тёмное поле', icon: 'Moon', color: 'bg-blue-500' },
-    { id: 'phase', name: 'Фазовый контраст', icon: 'Waves', color: 'bg-purple-500' },
-    { id: 'fluorescence', name: 'Флюоресценция', icon: 'Zap', color: 'bg-green-500' }
+  const nodes: NodeData[] = [
+    { id: 'light', type: 'source', label: 'Источник света', icon: 'Lightbulb', x: 100, y: 300, outputs: ['condenser'] },
+    { id: 'condenser', type: 'condenser', label: 'Конденсор', icon: 'Cone', x: 280, y: 300, inputs: ['light'], outputs: ['specimen'] },
+    { id: 'specimen', type: 'specimen', label: 'Образец', icon: 'Droplet', x: 460, y: 300, inputs: ['condenser'], outputs: ['objective'] },
+    { id: 'objective', type: 'objective', label: 'Объектив', icon: 'Circle', x: 640, y: 300, inputs: ['specimen'], outputs: ['method'] },
+    { id: 'method', type: 'method', label: 'Метод', icon: 'Sparkles', x: 820, y: 300, inputs: ['objective'], outputs: ['eyepiece'] },
+    { id: 'eyepiece', type: 'eyepiece', label: 'Окуляр', icon: 'Eye', x: 1000, y: 300, inputs: ['method'], outputs: ['result'] },
+    { id: 'result', type: 'result', label: 'Результат', icon: 'Target', x: 1180, y: 300, inputs: ['eyepiece'] }
+  ];
+
+  const connections: Connection[] = [
+    { from: 'light', to: 'condenser', active: true },
+    { from: 'condenser', to: 'specimen', active: condenser.na > 0.5 },
+    { from: 'specimen', to: 'objective', active: true },
+    { from: 'objective', to: 'method', active: objective.na > 0.3 },
+    { from: 'method', to: 'eyepiece', active: true },
+    { from: 'eyepiece', to: 'result', active: true }
   ];
 
   const getLightColor = () => {
-    const wl = config.lightWavelength;
-    if (wl < 450) return '#8B5CF6'; // violet
-    if (wl < 495) return '#0EA5E9'; // blue
-    if (wl < 570) return '#10B981'; // green
-    if (wl < 590) return '#F59E0B'; // yellow
-    if (wl < 620) return '#F97316'; // orange
-    return '#EF4444'; // red
+    const wl = lightSource.wavelength;
+    if (wl < 450) return '#8B5CF6';
+    if (wl < 495) return '#0EA5E9';
+    if (wl < 570) return '#10B981';
+    if (wl < 590) return '#F59E0B';
+    if (wl < 620) return '#F97316';
+    return '#EF4444';
   };
 
-  const visibleOrganelles = getVisibleOrganelles();
-  const resolution = calculateResolution();
+  const renderNodeContent = (node: NodeData) => {
+    switch (node.id) {
+      case 'light':
+        return (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-slate-400">Длина волны</span>
+              <Badge variant="secondary">{lightSource.wavelength} нм</Badge>
+            </div>
+            <Slider
+              value={[lightSource.wavelength]}
+              onValueChange={(v) => setLightSource({ ...lightSource, wavelength: v[0] })}
+              min={400}
+              max={700}
+              step={10}
+              className="w-full"
+            />
+            <div className="h-4 rounded" style={{ background: getLightColor() }} />
+          </div>
+        );
+
+      case 'condenser':
+        return (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-slate-400">NA конденсора</span>
+              <Badge variant="secondary">{condenser.na}</Badge>
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              {[0.5, 0.9, 1.25].map((na) => (
+                <Button
+                  key={na}
+                  size="sm"
+                  variant={condenser.na === na ? 'default' : 'outline'}
+                  onClick={() => setCondenser({ ...condenser, na })}
+                  className="text-xs"
+                >
+                  {na}
+                </Button>
+              ))}
+            </div>
+            <div className="text-xs text-slate-500">
+              {condenser.na >= 0.9 ? '✓ Освещение оптимально' : '⚠ Низкое разрешение'}
+            </div>
+          </div>
+        );
+
+      case 'specimen':
+        return (
+          <div className="space-y-2">
+            <div className="text-xs text-slate-400">Разрешение</div>
+            <div className="text-2xl font-bold text-purple-400">{calculateResolution().toFixed(0)} нм</div>
+            <div className="text-xs text-slate-500">
+              {calculateResolution() < 300 ? '🔬 Высокое' : calculateResolution() < 600 ? '👁 Среднее' : '⚠ Низкое'}
+            </div>
+          </div>
+        );
+
+      case 'objective':
+        return (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-slate-400">Увеличение</span>
+              <Badge variant="secondary">{objective.magnification}x</Badge>
+            </div>
+            <div className="grid grid-cols-4 gap-1">
+              {[10, 40, 60, 100].map((mag) => (
+                <Button
+                  key={mag}
+                  size="sm"
+                  variant={objective.magnification === mag ? 'default' : 'outline'}
+                  onClick={() => {
+                    const naMap: Record<number, number> = { 10: 0.25, 40: 0.65, 60: 0.85, 100: 1.4 };
+                    setObjective({
+                      magnification: mag,
+                      na: naMap[mag],
+                      immersion: mag === 100
+                    });
+                  }}
+                  className="text-xs p-1"
+                >
+                  {mag}
+                </Button>
+              ))}
+            </div>
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-slate-400">NA: {objective.na}</span>
+              <Badge variant={objective.immersion ? 'default' : 'outline'} className="text-xs">
+                {objective.immersion ? '🔬 Масло' : '💨 Воздух'}
+              </Badge>
+            </div>
+          </div>
+        );
+
+      case 'method':
+        return (
+          <div className="space-y-2">
+            <div className="text-xs text-slate-400 mb-2">Метод наблюдения</div>
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                { id: 'brightfield', name: 'Светлое', icon: 'Sun' },
+                { id: 'darkfield', name: 'Тёмное', icon: 'Moon' },
+                { id: 'phase', name: 'Фазовый', icon: 'Waves' },
+                { id: 'fluorescence', name: 'Флюор', icon: 'Zap' }
+              ].map((m) => (
+                <Button
+                  key={m.id}
+                  size="sm"
+                  variant={method === m.id ? 'default' : 'outline'}
+                  onClick={() => setMethod(m.id as any)}
+                  className="text-xs"
+                >
+                  <Icon name={m.icon as any} size={12} className="mr-1" />
+                  {m.name}
+                </Button>
+              ))}
+            </div>
+          </div>
+        );
+
+      case 'eyepiece':
+        return (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-slate-400">Окуляр</span>
+              <Badge variant="secondary">10x</Badge>
+            </div>
+            <div className="text-xl font-bold text-blue-400">
+              Итого: {objective.magnification * 10}x
+            </div>
+          </div>
+        );
+
+      case 'result':
+        const visible = getVisibleStructures();
+        return (
+          <div className="space-y-2 max-h-[300px] overflow-y-auto">
+            <div className="text-xs text-slate-400 sticky top-0 bg-slate-800 pb-2">
+              Видимые структуры ({visible.length})
+            </div>
+            <div className="space-y-2">
+              {visible.map((s) => (
+                <div
+                  key={s.name}
+                  className={`${s.color} bg-opacity-20 border border-current rounded p-2 animate-scale-in`}
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="text-lg">{s.emoji}</span>
+                    <div className="flex-1">
+                      <div className="text-xs font-semibold">{s.name}</div>
+                      <div className="text-xs text-slate-400">{s.size} нм</div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+
+      default:
+        return null;
+    }
+  };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 text-white p-4 md:p-8">
-      {showMobileWarning && window.innerWidth < 768 && (
+    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-purple-950 to-slate-950 text-white">
+      {showMobileWarning && window.innerWidth < 1024 && (
         <div className="fixed top-4 left-4 right-4 bg-purple-600/90 backdrop-blur-sm p-4 rounded-lg shadow-xl z-50 animate-fade-in">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <Icon name="RotateCw" size={24} />
-              <p className="text-sm">Поверните устройство горизонтально для лучшего просмотра</p>
+              <p className="text-sm">Поверните устройство горизонтально для полного просмотра схемы</p>
             </div>
             <Button
               variant="ghost"
@@ -107,351 +281,200 @@ export default function MicroscopySchema() {
         </div>
       )}
 
-      <div className="max-w-7xl mx-auto">
+      <div className="p-4 md:p-8">
         <div className="text-center mb-8 animate-fade-in">
-          <h1 className="text-4xl md:text-5xl font-bold mb-3 bg-gradient-to-r from-blue-400 via-purple-400 to-pink-400 bg-clip-text text-transparent">
+          <h1 className="text-3xl md:text-5xl font-bold mb-3 bg-gradient-to-r from-blue-400 via-purple-400 to-pink-400 bg-clip-text text-transparent">
             Оптический путь микроскопа
           </h1>
-          <p className="text-slate-300 text-lg">Интерактивная схема: от света до видимых структур</p>
+          <p className="text-slate-300 text-sm md:text-lg">
+            Node-based схема: измените параметры и увидьте результат
+          </p>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
-          <Card className="lg:col-span-2 bg-slate-800/50 backdrop-blur-sm border-purple-500/30 p-6">
-            <div className="relative">
-              <svg
-                viewBox="0 0 800 600"
-                className="w-full h-auto"
-                style={{ filter: 'drop-shadow(0 0 20px rgba(139, 92, 246, 0.3))' }}
+        <div className="relative min-h-[600px] bg-slate-900/30 rounded-xl border border-slate-700 p-8 overflow-x-auto">
+          <svg
+            className="absolute inset-0 w-full h-full pointer-events-none"
+            style={{ minWidth: '1400px', minHeight: '600px' }}
+          >
+            <defs>
+              <linearGradient id="connectionGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                <stop offset="0%" stopColor={getLightColor()} stopOpacity="0.8" />
+                <stop offset="100%" stopColor={getLightColor()} stopOpacity="0.3" />
+              </linearGradient>
+              <filter id="glow">
+                <feGaussianBlur stdDeviation="3" result="coloredBlur" />
+                <feMerge>
+                  <feMergeNode in="coloredBlur" />
+                  <feMergeNode in="SourceGraphic" />
+                </feMerge>
+              </filter>
+            </defs>
+
+            {connections.map((conn, idx) => {
+              const fromNode = nodes.find((n) => n.id === conn.from);
+              const toNode = nodes.find((n) => n.id === conn.to);
+              if (!fromNode || !toNode) return null;
+
+              const x1 = fromNode.x + 140;
+              const y1 = fromNode.y + 60;
+              const x2 = toNode.x;
+              const y2 = toNode.y + 60;
+
+              return (
+                <g key={idx}>
+                  <path
+                    d={`M ${x1} ${y1} L ${x2} ${y2}`}
+                    stroke={conn.active ? 'url(#connectionGradient)' : '#334155'}
+                    strokeWidth={conn.active ? '3' : '2'}
+                    strokeDasharray={conn.active ? '0' : '5,5'}
+                    filter={conn.active ? 'url(#glow)' : 'none'}
+                    className={conn.active ? 'animate-pulse' : ''}
+                    style={{ animationDuration: '3s' }}
+                  />
+                  {conn.active && (
+                    <circle
+                      cx={x1 + (x2 - x1) * 0.5}
+                      cy={y1 + (y2 - y1) * 0.5}
+                      r="4"
+                      fill={getLightColor()}
+                      className="animate-pulse"
+                      style={{ animationDuration: '2s' }}
+                    />
+                  )}
+                </g>
+              );
+            })}
+          </svg>
+
+          <div className="relative" style={{ minWidth: '1400px', minHeight: '600px' }}>
+            {nodes.map((node) => (
+              <Card
+                key={node.id}
+                className={`absolute transition-all duration-300 cursor-pointer
+                  ${
+                    selectedNode === node.id
+                      ? 'bg-slate-800 border-purple-500 shadow-2xl shadow-purple-500/50 scale-105'
+                      : 'bg-slate-800/80 border-slate-600 hover:border-purple-400'
+                  }
+                  backdrop-blur-sm`}
+                style={{
+                  left: `${node.x}px`,
+                  top: `${node.y}px`,
+                  width: '140px',
+                  minHeight: '120px'
+                }}
+                onClick={() => setSelectedNode(selectedNode === node.id ? null : node.id)}
               >
-                <defs>
-                  <linearGradient id="lightBeam" x1="0%" y1="0%" x2="0%" y2="100%">
-                    <stop offset="0%" stopColor={getLightColor()} stopOpacity="0.8" />
-                    <stop offset="100%" stopColor={getLightColor()} stopOpacity="0.2" />
-                  </linearGradient>
-                  <filter id="glow">
-                    <feGaussianBlur stdDeviation="4" result="coloredBlur" />
-                    <feMerge>
-                      <feMergeNode in="coloredBlur" />
-                      <feMergeNode in="SourceGraphic" />
-                    </feMerge>
-                  </filter>
-                </defs>
-
-                <g className="animate-pulse" style={{ animationDuration: '3s' }}>
-                  <circle cx="400" cy="550" r="30" fill={getLightColor()} opacity="0.6" filter="url(#glow)" />
-                  <text x="400" y="558" textAnchor="middle" fill="white" fontSize="14" fontWeight="bold">
-                    Источник
-                  </text>
-                </g>
-
-                <path
-                  d="M 380 520 L 380 480"
-                  stroke="url(#lightBeam)"
-                  strokeWidth="40"
-                  className="animate-fade-in"
-                  style={{ animationDuration: '2s', animationDelay: '0.5s' }}
-                />
-
-                <g
-                  onClick={() => toggleNode('condenser')}
-                  className="cursor-pointer transition-transform hover:scale-105"
-                >
-                  <rect x="340" y="450" width="120" height="30" fill="#4C1D95" rx="5" filter="url(#glow)" />
-                  <text x="400" y="470" textAnchor="middle" fill="white" fontSize="14" fontWeight="bold">
-                    Конденсор
-                  </text>
-                  {expandedNodes.has('condenser') && (
-                    <g className="animate-scale-in">
-                      <rect x="480" y="440" width="200" height="80" fill="#1e293b" rx="8" stroke="#8B5CF6" strokeWidth="2" />
-                      <text x="490" y="465" fill="#93C5FD" fontSize="12">
-                        NA: {config.condenserNA}
-                      </text>
-                      <text x="490" y="485" fill="#93C5FD" fontSize="12">
-                        Освещение: Кёлера
-                      </text>
-                      <text x="490" y="505" fill="#93C5FD" fontSize="12">
-                        Диафрагма: открыта
-                      </text>
-                    </g>
-                  )}
-                </g>
-
-                <path
-                  d="M 390 450 L 395 380 M 410 450 L 405 380"
-                  stroke="url(#lightBeam)"
-                  strokeWidth="15"
-                  className="animate-fade-in"
-                  style={{ animationDuration: '2s', animationDelay: '1s' }}
-                />
-
-                <g>
-                  <rect x="360" y="360" width="80" height="15" fill="#059669" rx="3" />
-                  <text x="400" y="390" textAnchor="middle" fill="#10B981" fontSize="12">
-                    Объект
-                  </text>
-                  <text x="400" y="405" textAnchor="middle" fill="#6EE7B7" fontSize="10">
-                    {resolution.toFixed(0)} нм
-                  </text>
-                </g>
-
-                <path
-                  d="M 390 360 L 385 290 M 410 360 L 415 290"
-                  stroke="url(#lightBeam)"
-                  strokeWidth="15"
-                  className="animate-fade-in"
-                  style={{ animationDuration: '2s', animationDelay: '1.5s' }}
-                />
-
-                <g
-                  onClick={() => toggleNode('objective')}
-                  className="cursor-pointer transition-transform hover:scale-105"
-                >
-                  <ellipse cx="400" cy="260" rx="60" ry="30" fill="#7E22CE" filter="url(#glow)" />
-                  <text x="400" y="268" textAnchor="middle" fill="white" fontSize="14" fontWeight="bold">
-                    Объектив {config.objectiveMagnification}x
-                  </text>
-                  {expandedNodes.has('objective') && (
-                    <g className="animate-scale-in">
-                      <rect x="480" y="230" width="220" height="100" fill="#1e293b" rx="8" stroke="#8B5CF6" strokeWidth="2" />
-                      <text x="490" y="255" fill="#93C5FD" fontSize="12">
-                        Увеличение: {config.objectiveMagnification}x
-                      </text>
-                      <text x="490" y="275" fill="#93C5FD" fontSize="12">
-                        NA: {config.objectiveNA}
-                      </text>
-                      <text x="490" y="295" fill="#93C5FD" fontSize="12">
-                        Иммерсия: {config.immersion ? 'Да (масло)' : 'Нет (воздух)'}
-                      </text>
-                      <text x="490" y="315" fill="#93C5FD" fontSize="12">
-                        Разрешение: {resolution.toFixed(0)} нм
-                      </text>
-                    </g>
-                  )}
-                </g>
-
-                <path
-                  d="M 395 230 L 398 160"
-                  stroke="url(#lightBeam)"
-                  strokeWidth="10"
-                  className="animate-fade-in"
-                  style={{ animationDuration: '2s', animationDelay: '2s' }}
-                />
-
-                <g
-                  onClick={() => toggleNode('eyepiece')}
-                  className="cursor-pointer transition-transform hover:scale-105"
-                >
-                  <ellipse cx="400" cy="120" rx="50" ry="40" fill="#0891B2" filter="url(#glow)" />
-                  <text x="400" y="128" textAnchor="middle" fill="white" fontSize="14" fontWeight="bold">
-                    Окуляр 10x
-                  </text>
-                  {expandedNodes.has('eyepiece') && (
-                    <g className="animate-scale-in">
-                      <rect x="100" y="90" width="200" height="80" fill="#1e293b" rx="8" stroke="#8B5CF6" strokeWidth="2" />
-                      <text x="110" y="115" fill="#93C5FD" fontSize="12">
-                        Увеличение: 10x
-                      </text>
-                      <text x="110" y="135" fill="#93C5FD" fontSize="12">
-                        Поле зрения: 20 мм
-                      </text>
-                      <text x="110" y="155" fill="#93C5FD" fontSize="12">
-                        Диоптрийная коррекция
-                      </text>
-                    </g>
-                  )}
-                </g>
-
-                <path
-                  d="M 400 80 L 400 40"
-                  stroke={getLightColor()}
-                  strokeWidth="6"
-                  className="animate-fade-in"
-                  style={{ animationDuration: '2s', animationDelay: '2.5s' }}
-                />
-
-                <g className="animate-scale-in" style={{ animationDelay: '3s' }}>
-                  <circle cx="400" cy="20" r="15" fill="#EC4899" filter="url(#glow)" />
-                  <text x="400" y="26" textAnchor="middle" fill="white" fontSize="12">
-                    👁
-                  </text>
-                </g>
-              </svg>
-            </div>
-          </Card>
-
-          <Card className="bg-slate-800/50 backdrop-blur-sm border-purple-500/30 p-6 space-y-4">
-            <h3 className="text-xl font-bold text-purple-300 flex items-center gap-2">
-              <Icon name="Settings" size={24} />
-              Конфигурация
-            </h3>
-
-            <div className="space-y-4">
-              <div>
-                <label className="text-sm text-slate-300 mb-2 block">Объектив</label>
-                <div className="flex gap-2">
-                  {[10, 40, 60, 100].map((mag) => (
-                    <Button
-                      key={mag}
-                      size="sm"
-                      variant={config.objectiveMagnification === mag ? 'default' : 'outline'}
-                      onClick={() => {
-                        setConfig({
-                          ...config,
-                          objectiveMagnification: mag,
-                          objectiveNA: mag === 100 ? 1.4 : mag === 60 ? 0.85 : mag === 40 ? 0.65 : 0.25
-                        });
-                      }}
-                      className="flex-1"
+                <div className="p-3 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <div
+                      className="w-8 h-8 rounded-full flex items-center justify-center"
+                      style={{ background: getLightColor(), opacity: 0.8 }}
                     >
-                      {mag}x
-                    </Button>
-                  ))}
-                </div>
-              </div>
+                      <Icon name={node.icon as any} size={16} className="text-white" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-xs font-bold text-white truncate">{node.label}</div>
+                    </div>
+                  </div>
 
-              <div>
-                <label className="text-sm text-slate-300 mb-2 flex items-center justify-between">
-                  <span>Иммерсия</span>
-                  <Badge variant={config.immersion ? 'default' : 'secondary'}>
-                    {config.immersion ? 'Вкл' : 'Выкл'}
-                  </Badge>
-                </label>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="w-full"
-                  onClick={() => {
-                    const newImmersion = !config.immersion;
-                    setConfig({
-                      ...config,
-                      immersion: newImmersion,
-                      objectiveNA: newImmersion ? 1.4 : 0.65
-                    });
-                  }}
-                >
-                  {config.immersion ? 'Отключить' : 'Включить'} масло
-                </Button>
-              </div>
-
-              <div>
-                <label className="text-sm text-slate-300 mb-2 block">
-                  Длина волны: {config.lightWavelength} нм
-                </label>
-                <input
-                  type="range"
-                  min="400"
-                  max="700"
-                  value={config.lightWavelength}
-                  onChange={(e) => setConfig({ ...config, lightWavelength: parseInt(e.target.value) })}
-                  className="w-full accent-purple-500"
-                  style={{
-                    background: `linear-gradient(to right, 
-                      #8B5CF6 0%, 
-                      #0EA5E9 20%, 
-                      #10B981 40%, 
-                      #F59E0B 60%, 
-                      #F97316 80%, 
-                      #EF4444 100%)`
-                  }}
-                />
-              </div>
-
-              <div>
-                <label className="text-sm text-slate-300 mb-2 block">Метод наблюдения</label>
-                <div className="space-y-2">
-                  {methods.map((method) => (
-                    <Button
-                      key={method.id}
-                      size="sm"
-                      variant={config.method === method.id ? 'default' : 'outline'}
-                      onClick={() => setConfig({ ...config, method: method.id as any })}
-                      className="w-full justify-start"
-                    >
-                      <Icon name={method.icon as any} size={16} className="mr-2" />
-                      {method.name}
-                    </Button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="pt-4 border-t border-slate-700">
-                <div className="text-sm text-slate-400 space-y-1">
-                  <p>
-                    <span className="text-purple-300">Разрешение:</span> {resolution.toFixed(0)} нм
-                  </p>
-                  <p>
-                    <span className="text-purple-300">Увеличение:</span> {config.objectiveMagnification * 10}x
-                  </p>
-                </div>
-              </div>
-            </div>
-          </Card>
-        </div>
-
-        <Card className="bg-slate-800/50 backdrop-blur-sm border-purple-500/30 p-6">
-          <h3 className="text-xl font-bold text-purple-300 flex items-center gap-2 mb-4">
-            <Icon name="Eye" size={24} />
-            Видимые структуры
-          </h3>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            {visibleOrganelles.map((org) => (
-              <div
-                key={org.name}
-                className={`p-4 rounded-lg border-2 transition-all ${
-                  org.visible
-                    ? 'bg-green-900/30 border-green-500 animate-scale-in'
-                    : 'bg-slate-900/30 border-slate-600 opacity-50'
-                }`}
-              >
-                <div className="flex items-start justify-between mb-2">
-                  <h4 className="font-semibold text-sm">{org.nameRu}</h4>
-                  {org.visible ? (
-                    <Icon name="CheckCircle2" size={18} className="text-green-400" />
-                  ) : (
-                    <Icon name="XCircle" size={18} className="text-slate-500" />
+                  {selectedNode === node.id && (
+                    <div className="animate-scale-in mt-3 border-t border-slate-700 pt-3">
+                      {renderNodeContent(node)}
+                    </div>
                   )}
                 </div>
-                <p className="text-xs text-slate-400">{org.name}</p>
-                <p className="text-xs text-purple-300 mt-1">{org.size} нм</p>
-                <Badge
-                  variant="outline"
-                  className="mt-2 text-xs"
-                  style={{
-                    borderColor:
-                      org.type === 'animal'
-                        ? '#0EA5E9'
-                        : org.type === 'plant'
-                        ? '#10B981'
-                        : org.type === 'bacteria'
-                        ? '#F59E0B'
-                        : '#EC4899'
-                  }}
-                >
-                  {org.type === 'animal'
-                    ? 'Животная'
-                    : org.type === 'plant'
-                    ? 'Растительная'
-                    : org.type === 'bacteria'
-                    ? 'Бактерия'
-                    : 'Вирус'}
-                </Badge>
-              </div>
+
+                {node.outputs && node.outputs.length > 0 && (
+                  <div
+                    className="absolute right-0 top-1/2 transform translate-x-1/2 -translate-y-1/2 w-3 h-3 rounded-full border-2 border-slate-900"
+                    style={{ background: getLightColor() }}
+                  />
+                )}
+
+                {node.inputs && node.inputs.length > 0 && (
+                  <div
+                    className="absolute left-0 top-1/2 transform -translate-x-1/2 -translate-y-1/2 w-3 h-3 rounded-full border-2 border-slate-900"
+                    style={{ background: getLightColor() }}
+                  />
+                )}
+              </Card>
             ))}
           </div>
+        </div>
 
-          <div className="mt-6 p-4 bg-purple-900/30 rounded-lg border border-purple-500/50">
-            <p className="text-sm text-slate-300">
-              <Icon name="Info" size={16} className="inline mr-2" />
-              <strong>Совет:</strong>{' '}
-              {config.objectiveMagnification < 100
-                ? 'Попробуйте объектив 100x с иммерсией для максимального разрешения'
-                : config.method === 'brightfield'
-                ? 'Переключитесь на флюоресценцию для наблюдения вирусов и рибосом'
-                : 'Отличная конфигурация! Видны даже мельчайшие структуры'}
+        <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4">
+          <Card className="bg-slate-800/50 backdrop-blur-sm border-purple-500/30 p-4">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-10 h-10 rounded-full bg-purple-500/20 flex items-center justify-center">
+                <Icon name="Microscope" size={20} className="text-purple-400" />
+              </div>
+              <div>
+                <div className="text-sm font-bold">Разрешение</div>
+                <div className="text-2xl font-bold text-purple-400">{calculateResolution().toFixed(0)} нм</div>
+              </div>
+            </div>
+            <p className="text-xs text-slate-400">
+              {calculateResolution() < 300
+                ? '🔬 Отличное разрешение — видны мелкие структуры'
+                : calculateResolution() < 600
+                ? '👁 Среднее разрешение — видны основные органеллы'
+                : '⚠ Низкое разрешение — видны только крупные объекты'}
             </p>
+          </Card>
+
+          <Card className="bg-slate-800/50 backdrop-blur-sm border-blue-500/30 p-4">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-10 h-10 rounded-full bg-blue-500/20 flex items-center justify-center">
+                <Icon name="Zap" size={20} className="text-blue-400" />
+              </div>
+              <div>
+                <div className="text-sm font-bold">Увеличение</div>
+                <div className="text-2xl font-bold text-blue-400">{objective.magnification * 10}x</div>
+              </div>
+            </div>
+            <p className="text-xs text-slate-400">
+              Объектив {objective.magnification}x × Окуляр 10x
+            </p>
+          </Card>
+
+          <Card className="bg-slate-800/50 backdrop-blur-sm border-green-500/30 p-4">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-10 h-10 rounded-full bg-green-500/20 flex items-center justify-center">
+                <Icon name="Eye" size={20} className="text-green-400" />
+              </div>
+              <div>
+                <div className="text-sm font-bold">Видимые объекты</div>
+                <div className="text-2xl font-bold text-green-400">{getVisibleStructures().length}</div>
+              </div>
+            </div>
+            <p className="text-xs text-slate-400">
+              {method === 'fluorescence'
+                ? '✨ Флюоресценция — максимум структур'
+                : method === 'darkfield'
+                ? '🌙 Тёмное поле — контрастные объекты'
+                : '☀️ Классическое наблюдение'}
+            </p>
+          </Card>
+        </div>
+
+        <div className="mt-6 p-4 bg-gradient-to-r from-purple-900/30 to-blue-900/30 rounded-lg border border-purple-500/50">
+          <div className="flex items-start gap-3">
+            <Icon name="Info" size={20} className="text-purple-400 mt-0.5 flex-shrink-0" />
+            <div className="text-sm text-slate-300 space-y-1">
+              <p className="font-semibold text-purple-300">
+                💡 Совет: {objective.magnification === 100 && objective.immersion
+                  ? 'Отличная конфигурация! Попробуйте флюоресценцию для наблюдения вирусов'
+                  : objective.magnification < 60
+                  ? 'Увеличьте объектив до 100x и включите иммерсию для максимального разрешения'
+                  : 'Попробуйте иммерсионный объектив 100x для наблюдения бактерий и вирусов'}
+              </p>
+              <p className="text-xs text-slate-400">
+                Кликайте на ноды, чтобы изменить параметры и увидеть, как меняется результат
+              </p>
+            </div>
           </div>
-        </Card>
+        </div>
       </div>
     </div>
   );
